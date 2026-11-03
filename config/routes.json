@@ -1,0 +1,23 @@
+
+{
+  "version": "0.1.0",
+  "environment": "staging",
+  "gateway_enabled": false,
+  "services": {
+    "noveam": {
+      "enabled": false,
+      "routes": [
+        {
+          "name": "registration",
+          "path": "/api/auth/register",
+          "methods": ["POST"]
+        },
+        {
+          "name": "login",
+          "path": "/api/auth/login",
+          "methods": ["POST"]
+        }
+      ]
+    }
+  }
+}
