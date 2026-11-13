@@ -1,0 +1,1 @@
+import {defineConfig} from 'vite';export default defineConfig({server:{proxy:{'/api':{target:'http://manager:8002',changeOrigin:true},'/health':{target:'http://manager:8002',changeOrigin:true}}}});

@@ -1,0 +1,36 @@
+services:
+  manager:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://noviokro:local_only_password@db:5432/noviokro
+      NOVIOKRO_V12_DATABASE_URL: postgresql+psycopg://noviokro:local_only_password@db:5432/noviokro
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: noviokro
+      POSTGRES_PASSWORD: local_only_password
+      POSTGRES_DB: noviokro
+    volumes:
+      - noviokro_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noviokro"]
+      interval: 5s
+      retries: 10
+  dashboard:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./dashboard:/app
+      - dashboard_node_modules:/app/node_modules
+    command: sh -c "npm install --package-lock=false && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "127.0.0.1:3000:3000"
+volumes:
+  noviokro_db:
+  dashboard_node_modules:
