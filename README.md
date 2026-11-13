@@ -1,2 +1,2 @@
 # noviokro-noveam-integration
-Noviokro Api Maneger integration
+Noviokro Api Manager integration
