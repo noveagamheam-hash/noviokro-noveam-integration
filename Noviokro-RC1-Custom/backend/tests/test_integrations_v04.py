@@ -64,3 +64,27 @@ def test_noveam_discovers_custom_catalog(monkeypatch):
     saved = next(row for row in rows if row["id"] == result["id"])
     assert saved["spec_version"] == "noviokro-api/1"
     assert saved["endpoints"] == [route]
+
+
+def test_noveam_categories_requires_admin_and_fetches_live_data(monkeypatch):
+    path = "/api/v1/integrations/noveam/professional/categories"
+    calls = []
+    payload = [{"id": 1, "name": "Sample category"}]
+
+    def categories_response(request):
+        calls.append(request)
+        assert request.method == "GET"
+        assert str(request.url) == "https://noveam-backend.onrender.com/api/professional/categories"
+        assert "x-admin-key" not in request.headers
+        return httpx.Response(200, json=payload)
+
+    async_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: async_client(
+        transport=httpx.MockTransport(categories_response), **kwargs,
+    ))
+    assert client.get(path).status_code == 401
+    assert not calls
+    response = client.get(path, headers=H)
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert len(calls) == 1

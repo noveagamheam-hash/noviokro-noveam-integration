@@ -152,5 +152,21 @@ async def service_health(project: str, service: str, x_admin_key: str | None = H
     except httpx.RequestError:
         return {"project": project, "service": service, "reachable": False}
 
+
+@router.get("/noveam/professional/categories")
+async def noveam_professional_categories(x_admin_key: str | None = Header(None)):
+    require_admin(x_admin_key)
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False) as client:
+            response = await client.get(
+                "https://noveam-backend.onrender.com/api/professional/categories",
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(502, "Unable to retrieve NOVEAM professional categories") from exc
+
+
 def initialize_v04():
     Base.metadata.create_all(engine, tables=[Discovery.__table__])
