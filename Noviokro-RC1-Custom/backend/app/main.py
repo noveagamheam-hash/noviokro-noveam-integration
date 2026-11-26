@@ -238,3 +238,7 @@ app.include_router(v19_router)
 
 from .v20 import router as v20_router
 app.include_router(v20_router)
+
+# Dedicated NOVEAM user traffic; separate from manager administrative proxies.
+from .noveam_gateway import create_noveam_gateway
+app.mount("/noveam", create_noveam_gateway())

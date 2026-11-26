@@ -67,6 +67,7 @@ def test_noveam_discovers_custom_catalog(monkeypatch):
 
 
 def test_noveam_categories_requires_admin_and_fetches_live_data(monkeypatch):
+    monkeypatch.setenv("NOVIOKRO_SERVICE_NOVEAM_BACKEND", "https://noveam.example")
     path = "/api/v1/integrations/noveam/professional/categories"
     calls = []
     payload = [{"id": 1, "name": "Sample category"}]
@@ -74,7 +75,7 @@ def test_noveam_categories_requires_admin_and_fetches_live_data(monkeypatch):
     def categories_response(request):
         calls.append(request)
         assert request.method == "GET"
-        assert str(request.url) == "https://noveam-backend.onrender.com/api/professional/categories"
+        assert str(request.url) == "https://noveam.example/api/professional/categories"
         assert "x-admin-key" not in request.headers
         return httpx.Response(200, json=payload)
 
@@ -88,3 +89,26 @@ def test_noveam_categories_requires_admin_and_fetches_live_data(monkeypatch):
     assert response.status_code == 200
     assert response.json() == payload
     assert len(calls) == 1
+
+
+def test_noveam_native_backend_openapi_fallback(monkeypatch):
+    monkeypatch.setenv('NOVIOKRO_SERVICE_NOVEAM_NATIVEQA', 'http://127.0.0.1:8000')
+    calls = []
+    def upstream(request):
+        calls.append(request.url.path)
+        assert request.method == 'GET'
+        assert 'x-admin-key' not in request.headers
+        if request.url.path == '/api.json':
+            return httpx.Response(404, json={'detail': 'Not Found'})
+        assert request.url.path == '/openapi.json'
+        return httpx.Response(200, json={'openapi': '3.1.0', 'info': {'title':'NOVEAM'}, 'paths': {
+            '/api/search': {'get': {'summary': 'Search', 'parameters': [{'in':'query','name':'q'}]}}
+        }})
+    native_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: native_client(
+        transport=httpx.MockTransport(upstream), **kwargs))
+    response = client.post('/api/v1/integrations/discover', headers=H,
+                           json={'project':'noveam','service':'nativeqa'})
+    assert response.status_code == 201, response.text
+    assert response.json()['endpoint_count'] == 1
+    assert calls == ['/api.json', '/openapi.json']

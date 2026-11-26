@@ -9,6 +9,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, String, Text
 from .extensions import Base, Session, engine, require_admin
+from .catalog import openapi_endpoints
 
 router = APIRouter(prefix="/api/v1/integrations", tags=["v0.4 integrations"])
 
@@ -90,15 +91,27 @@ async def discover(body: DiscoveryRequest, x_admin_key: str | None = Header(None
     try:
         async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as client:
             response = await client.get(base + catalog_path, headers={"Accept": "application/json"})
+            # Native NOVEAM FastAPI deployments expose OpenAPI rather than the
+            # separately hosted frontend's custom catalog. Only a missing custom
+            # catalog permits fallback; authorization/outages stay visible.
+            if custom and response.status_code == 404:
+                catalog_path = "/openapi.json"
+                response = await client.get(base + catalog_path, headers={"Accept": "application/json"})
             response.raise_for_status()
             if len(response.content) > 2_000_000:
                 raise HTTPException(413, "API catalog too large")
             spec = response.json()
     except (httpx.HTTPError, ValueError):
         raise HTTPException(502, f"Unable to retrieve valid JSON from {catalog_path}")
-    if custom:
+    if custom and catalog_path == "/api.json":
         endpoints = noveam_endpoints(spec)
         return save_discovery(body, "NOVEAM", CUSTOM_FORMAT, endpoints)
+    if custom:
+        try:
+            endpoints = openapi_endpoints(spec)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return save_discovery(body, "NOVEAM", spec["openapi"], endpoints)
     if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict) or not isinstance(spec.get("openapi"), str):
         raise HTTPException(422, "Expected OpenAPI 3 document")
     endpoints = []
@@ -148,7 +161,11 @@ async def service_health(project: str, service: str, x_admin_key: str | None = H
     try:
         async with httpx.AsyncClient(timeout=5, follow_redirects=False, trust_env=False) as client:
             response = await client.get(base + probe_path)
-        return {"project": project, "service": service, "upstream_status": response.status_code, "reachable": True}
+            if project == "noveam" and response.status_code == 404:
+                probe_path = "/openapi.json"
+                response = await client.get(base + probe_path)
+        return {"project": project, "service": service, "upstream_status": response.status_code,
+                "reachable": True, "available": response.is_success, "probe_path": probe_path}
     except httpx.RequestError:
         return {"project": project, "service": service, "reachable": False}
 
@@ -156,10 +173,11 @@ async def service_health(project: str, service: str, x_admin_key: str | None = H
 @router.get("/noveam/professional/categories")
 async def noveam_professional_categories(x_admin_key: str | None = Header(None)):
     require_admin(x_admin_key)
+    base = operator_target("noveam", "backend")
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False) as client:
             response = await client.get(
-                "https://noveam-backend.onrender.com/api/professional/categories",
+                base + "/api/professional/categories",
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
@@ -170,3 +188,15 @@ async def noveam_professional_categories(x_admin_key: str | None = Header(None))
 
 def initialize_v04():
     Base.metadata.create_all(engine, tables=[Discovery.__table__])
+
+@router.get('/noveam/routing')
+def noveam_routing_status(x_admin_key: str | None = Header(None)):
+    require_admin(x_admin_key)
+    from .noveam_gateway_contract import backend_origin
+    try:
+        backend = backend_origin(os.getenv('NOVIOKRO_SERVICE_NOVEAM_BACKEND', ''))
+    except ValueError:
+        backend = None
+    return {'enabled': os.getenv('NOVIOKRO_NOVEAM_GATEWAY_ENABLED') == '1',
+            'backend': backend, 'http_prefix': '/noveam/api',
+            'user_auth': 'forwarded to NOVEAM', 'websocket_proxy': False}
